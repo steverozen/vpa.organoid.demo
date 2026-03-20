@@ -1,0 +1,18 @@
+# Claude Code
+.claude/
+
+# R
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+.httr-oauth
+
+# Quarto
+.quarto/
+*_files/
+*.html
+
+# Large data files
+*.rds
+*.rda
