@@ -27,11 +27,12 @@ teratogen and has been linked to increased risk of autism spectrum disorder and 
 neurodevelopmental conditions.
 
 This analysis examines single-cell RNA-seq data from
-[Yentür et al. (2025, bioRxiv)](https://doi.org/10.1101/2025.01.09.632137),
+[Yentür et al. (2025, bioRxiv)](https://doi.org/10.1101/2025.06.24.661272),
 comparing **control** vs **VPA-treated** human dorsal forebrain organoids.
 The dataset was obtained from
 [CELLxGENE](https://cellxgene.cziscience.com/) and contains 26,499 cells across
-5 annotated cell types.
+9 cell types annotated by the original authors (RG, IPC/Newborn ExN, Young dExN,
+Mature dExN, InhN, Cajal-Retzius N, RG stressed, dExN stressed, Unknown).
 
 **Experimental design**: 2 donors, each contributing organoids to both control and
 VPA conditions (a paired design). Because we have only 2 biological replicates per
@@ -102,12 +103,19 @@ genes** (`r sum(is_symbol)` with gene symbols, `r sum(!is_symbol)` Ensembl IDs o
 
 ```{r}
 #| label: color-palettes
+# Use the authors' original cell type annotations (author_cell_type column)
+# rather than the coarser CELLxGENE Cell Ontology mapping (cell_type column).
+# The CELLxGENE cell_type column collapses 9 types into 5 broad categories.
 cell_type_colors <- c(
-  "progenitor cell"               = "#1b9e77",
-  "neuronal-restricted precursor" = "#d95f02",
-  "cerebral cortex neuron"        = "#7570b3",
-  "Cajal-Retzius cell"            = "#e7298a",
-  "unknown"                       = "#999999"
+  "RG"               = "#1b9e77",
+  "IPC/Newborn ExN"  = "#d95f02",
+  "Young dExN"       = "#7570b3",
+  "Mature dExN"      = "#e7298a",
+  "InhN"             = "#66a61e",
+  "Cajal-Retzius N"  = "#e6ab02",
+  "RG stressed"      = "#a6d854",
+  "dExN stressed"    = "#b3b3b3",
+  "Unknown"          = "#999999"
 )
 
 condition_colors <- c(
@@ -146,13 +154,13 @@ cat("Cells per condition × donor:\n")
 table(sce$condition, sce$donor_id)
 
 cat("\nCells per condition × cell type:\n")
-table(sce$condition, sce$cell_type)
+table(sce$condition, sce$author_cell_type)
 ```
 
 ```{r}
 #| label: design-table-dt
 design_df <- as.data.frame(
-  table(Condition = sce$condition, Donor = sce$donor_id, CellType = sce$cell_type)
+  table(Condition = sce$condition, Donor = sce$donor_id, CellType = sce$author_cell_type)
 ) |>
   dplyr::filter(Freq > 0) |>
   tidyr::pivot_wider(names_from = Condition, values_from = Freq, values_fill = 0)
@@ -174,7 +182,7 @@ profiles. The UMAP coordinates here were computed by the original study authors.
 umap_df <- data.frame(
   UMAP1     = reducedDim(sce, "X_umap")[, 1],
   UMAP2     = reducedDim(sce, "X_umap")[, 2],
-  cell_type = sce$cell_type,
+  cell_type = sce$author_cell_type,
   condition = sce$condition,
   donor_id  = sce$donor_id,
   cell_phase = sce$cell_phase
@@ -290,7 +298,7 @@ differentiation, proliferation, or survival.
 #| label: composition-data
 comp_df <- as.data.frame(table(
   condition = sce$condition,
-  cell_type = sce$cell_type,
+  cell_type = sce$author_cell_type,
   donor_id  = sce$donor_id
 ))
 
@@ -383,14 +391,16 @@ rounding artifacts.
 # Back-transform log1p to approximate counts
 # Work per cell type to manage memory
 cell_types_for_de <- c(
-  "progenitor cell",
-  "cerebral cortex neuron",
-  "neuronal-restricted precursor"
+  "RG",
+  "IPC/Newborn ExN",
+  "Young dExN",
+  "Mature dExN",
+  "InhN"
 )
 
 # Create pseudobulk samples
 make_pseudobulk <- function(sce, cell_type_name) {
-  idx <- which(sce$cell_type == cell_type_name)
+  idx <- which(sce$author_cell_type == cell_type_name)
   sub <- sce[, idx]
 
   # Define groups
@@ -837,7 +847,7 @@ if (length(known_genes_present) > 0) {
   expr_mat <- as.matrix(assay(sce, "X")[known_genes_present, , drop = FALSE])
   expr_df <- as.data.frame(t(expr_mat))
   expr_df$condition <- sce$condition
-  expr_df$cell_type <- sce$cell_type
+  expr_df$cell_type <- sce$author_cell_type
 
   expr_long <- expr_df |>
     tidyr::pivot_longer(
@@ -921,7 +931,7 @@ n_cells <- ncol(sce)
 n_ctrl <- sum(sce$condition == "CTRL")
 n_vpa <- sum(sce$condition == "VPA")
 n_donors <- length(unique(sce$donor_id))
-n_cell_types <- length(unique(sce$cell_type))
+n_cell_types <- length(unique(sce$author_cell_type))
 
 # Composition changes
 comp_summary <- comp_cond |>
