@@ -72,7 +72,8 @@ library(here)
 library(Matrix)
 library(viridis)
 
-theme_set(theme_bw(base_size = 14))
+base_size <- 14
+theme_set(theme_bw(base_size = base_size))
 ```
 
 ```{r}
@@ -103,16 +104,16 @@ genes** (`r sum(is_symbol)` with gene symbols, `r sum(!is_symbol)` Ensembl IDs o
 ```{r}
 #| label: color-palettes
 cell_type_colors <- c(
-  "progenitor cell"               = "#1b9e77",
+  "progenitor cell" = "#1b9e77",
   "neuronal-restricted precursor" = "#d95f02",
-  "cerebral cortex neuron"        = "#7570b3",
-  "Cajal-Retzius cell"            = "#e7298a",
-  "unknown"                       = "#999999"
+  "cerebral cortex neuron" = "#7570b3",
+  "Cajal-Retzius cell" = "#e7298a",
+  "unknown" = "#999999"
 )
 
 condition_colors <- c(
   "CTRL" = "#4393c3",
-  "VPA"  = "#d6604d"
+  "VPA" = "#d6604d"
 )
 
 donor_colors <- c(
@@ -128,7 +129,10 @@ names(donor_colors) <- sort(unique(sce$donor_id))
 gene_link <- function(symbol) {
   paste0(
     '<a href="https://www.genecards.org/cgi-bin/carddisp.pl?gene=',
-    symbol, '" target="_blank">', symbol, '</a>'
+    symbol,
+    '" target="_blank">',
+    symbol,
+    '</a>'
   )
 }
 ```
@@ -152,13 +156,24 @@ table(sce$condition, sce$cell_type)
 ```{r}
 #| label: design-table-dt
 design_df <- as.data.frame(
-  table(Condition = sce$condition, Donor = sce$donor_id, CellType = sce$cell_type)
+  table(
+    Condition = sce$condition,
+    Donor = sce$donor_id,
+    CellType = sce$cell_type
+  )
 ) |>
   dplyr::filter(Freq > 0) |>
-  tidyr::pivot_wider(names_from = Condition, values_from = Freq, values_fill = 0)
+  tidyr::pivot_wider(
+    names_from = Condition,
+    values_from = Freq,
+    values_fill = 0
+  )
 
-DT::datatable(design_df, caption = "Cell counts by donor, condition, and cell type",
-              options = list(pageLength = 20))
+DT::datatable(
+  design_df,
+  caption = "Cell counts by donor, condition, and cell type",
+  options = list(pageLength = 20)
+)
 ```
 
 
@@ -172,11 +187,11 @@ profiles. The UMAP coordinates here were computed by the original study authors.
 ```{r}
 #| label: umap-data
 umap_df <- data.frame(
-  UMAP1     = reducedDim(sce, "X_umap")[, 1],
-  UMAP2     = reducedDim(sce, "X_umap")[, 2],
+  UMAP1 = reducedDim(sce, "X_umap")[, 1],
+  UMAP2 = reducedDim(sce, "X_umap")[, 2],
   cell_type = sce$cell_type,
   condition = sce$condition,
-  donor_id  = sce$donor_id,
+  donor_id = sce$donor_id,
   cell_phase = sce$cell_phase
 )
 ```
@@ -260,15 +275,23 @@ umap_sub <- umap_df[idx, ]
 
 p <- plot_ly(
   umap_sub,
-  x = ~UMAP1, y = ~UMAP2,
+  x = ~UMAP1,
+  y = ~UMAP2,
   color = ~cell_type,
   colors = cell_type_colors,
-  text = ~paste("Cell type:", cell_type,
-                "<br>Condition:", condition,
-                "<br>Donor:", donor_id),
-  type = "scatter", mode = "markers",
+  text = ~ paste(
+    "Cell type:",
+    cell_type,
+    "<br>Condition:",
+    condition,
+    "<br>Donor:",
+    donor_id
+  ),
+  type = "scatter",
+  mode = "markers",
   marker = list(size = 3, opacity = 0.6),
-  width = 900, height = 650
+  width = 900,
+  height = 650
 ) |>
   layout(
     title = "Interactive UMAP (10,000 cell subsample)",
@@ -354,7 +377,7 @@ comp_table <- comp_cond |>
   mutate(
     label = paste0(Freq, " (", round(proportion * 100, 1), "%)")
   ) |>
-  select(condition, cell_type, label) |>
+  dplyr::select(condition, cell_type, label) |>
   tidyr::pivot_wider(names_from = condition, values_from = label)
 
 DT::datatable(comp_table, caption = "Cell counts and proportions per condition",
@@ -540,7 +563,8 @@ volcano_plots <- lapply(names(de_results), function(ct) {
     geom_text_repel(
       data = top_genes,
       aes(label = gene),
-      size = 3, max.overlaps = 20, color = "black"
+      size = 0.9 * base_size / ggplot2::.pt,
+      max.overlaps = 20, color = "black"
     ) +
     geom_hline(yintercept = -log10(0.05), linetype = "dashed", color = "blue") +
     labs(
@@ -571,7 +595,7 @@ top_de <- de_all |>
     adj.P.Val = signif(adj.P.Val, 3),
     B = round(B, 2)
   ) |>
-  select(cell_type, gene, logFC, AveExpr, t, P.Value, adj.P.Val, B)
+  dplyr::select(cell_type, gene, logFC, AveExpr, t, P.Value, adj.P.Val, B)
 
 DT::datatable(
   top_de,
@@ -661,11 +685,11 @@ from MSigDB.
 #| message: false
 # Get gene sets
 hallmark_df <- msigdbr(species = "Homo sapiens", category = "H") |>
-  select(gs_name, gene_symbol)
+  dplyr::select(gs_name, gene_symbol)
 hallmark <- split(hallmark_df$gene_symbol, hallmark_df$gs_name)
 
 gobp_df <- msigdbr(species = "Homo sapiens", category = "C5", subcategory = "GO:BP") |>
-  select(gs_name, gene_symbol)
+  dplyr::select(gs_name, gene_symbol)
 gobp <- split(gobp_df$gene_symbol, gobp_df$gs_name)
 
 # Combine
@@ -701,8 +725,8 @@ gsea_all <- bind_rows(gsea_results)
 
 ```{r}
 #| label: gsea-dotplot
-#| fig-width: 14
-#| fig-height: 10
+#| fig-width: 10
+#| fig-height: 14
 #| warning: false
 # Top pathways per cell type (by adjusted p-value)
 top_pathways <- gsea_all |>
@@ -726,7 +750,7 @@ if (nrow(top_pathways) > 0) {
   )) +
     geom_point() +
     scale_color_gradient2(low = "blue", mid = "grey80", high = "red", midpoint = 0) +
-    facet_wrap(~cell_type, scales = "free_y") +
+    facet_wrap(~cell_type, scales = "free_y", ncol = 1) +
     labs(
       title = "Top enriched pathways (GSEA, padj < 0.05)",
       x = "Normalized Enrichment Score",
@@ -734,7 +758,7 @@ if (nrow(top_pathways) > 0) {
       size = "-log10(padj)",
       color = "NES"
     ) +
-    theme(axis.text.y = element_text(size = 8))
+    theme(axis.text.y = element_text(size = rel(0.6)))
 } else {
   cat("No pathways reached significance at padj < 0.05.\n")
   # Show top pathways at a relaxed threshold
@@ -759,7 +783,7 @@ if (nrow(top_pathways) > 0) {
     )) +
       geom_point() +
       scale_color_gradient2(low = "blue", mid = "grey80", high = "red", midpoint = 0) +
-      facet_wrap(~cell_type, scales = "free_y") +
+      facet_wrap(~cell_type, scales = "free_y", ncol = 1) +
       labs(
         title = "Top pathways by nominal p-value (none reached padj < 0.05)",
         x = "Normalized Enrichment Score",
@@ -767,7 +791,7 @@ if (nrow(top_pathways) > 0) {
         size = "-log10(p-value)",
         color = "NES"
       ) +
-      theme(axis.text.y = element_text(size = 8))
+      theme(axis.text.y = element_text(size = rel(0.6)))
   }
 }
 ```
@@ -785,7 +809,7 @@ gsea_table <- gsea_all |>
     padj = signif(padj, 3),
     size = as.integer(size)
   ) |>
-  select(cell_type, pathway, NES, pval, padj, size) |>
+  dplyr::select(cell_type, pathway, NES, pval, padj, size) |>
   head(100)
 
 DT::datatable(
@@ -830,8 +854,9 @@ cat("Missing:", setdiff(known_genes, known_genes_present), "\n")
 ```{r}
 #| label: known-genes-violin
 #| fig-width: 16
-#| fig-height: 14
+#| fig-height: 10
 #| warning: false
+#| results: asis
 # Extract expression for known genes
 if (length(known_genes_present) > 0) {
   expr_mat <- as.matrix(assay(sce, "X")[known_genes_present, , drop = FALSE])
@@ -850,20 +875,35 @@ if (length(known_genes_present) > 0) {
   expr_long_major <- expr_long |>
     dplyr::filter(cell_type %in% cell_types_for_de)
 
-  ggplot(expr_long_major, aes(condition, expression, fill = condition)) +
-    geom_violin(scale = "width", alpha = 0.7, linewidth = 0.3) +
-    scale_fill_manual(values = condition_colors) +
-    facet_grid(gene ~ cell_type, scales = "free_y", switch = "y") +
-    theme(
-      strip.placement = "outside",
-      strip.text.y.left = element_text(angle = 0, size = 8),
-      strip.text.x = element_text(size = 9),
-      axis.text.x = element_text(angle = 45, hjust = 1)
-    ) +
-    labs(
-      title = "Expression of known VPA-response and neural genes",
-      x = NULL, y = "log1p expression", fill = "Condition"
-    )
+  # Split into groups of 6 genes to keep panels readable
+  genes_per_plot <- 6
+  gene_groups <- split(
+    unique(expr_long_major$gene),
+    ceiling(seq_along(unique(expr_long_major$gene)) / genes_per_plot)
+  )
+
+  for (i in seq_along(gene_groups)) {
+    p <- expr_long_major |>
+      dplyr::filter(gene %in% gene_groups[[i]]) |>
+      ggplot(aes(condition, expression, fill = condition)) +
+      geom_violin(scale = "width", alpha = 0.7, linewidth = 0.3) +
+      scale_fill_manual(values = condition_colors) +
+      facet_grid(gene ~ cell_type, scales = "free_y", switch = "y") +
+      theme(
+        strip.placement = "outside",
+        strip.text.y.left = element_text(angle = 0, size = rel(0.65)),
+        strip.text.x = element_text(size = rel(0.7)),
+        axis.text.x = element_text(angle = 45, hjust = 1, size = rel(0.6))
+      ) +
+      labs(
+        title = paste0(
+          "VPA-response and neural genes (group ", i,
+          " of ", length(gene_groups), ")"
+        ),
+        x = NULL, y = "log1p expression", fill = "Condition"
+      )
+    print(p)
+  }
 }
 ```
 
@@ -925,7 +965,7 @@ n_cell_types <- length(unique(sce$cell_type))
 
 # Composition changes
 comp_summary <- comp_cond |>
-  select(condition, cell_type, proportion) |>
+  dplyr::select(condition, cell_type, proportion) |>
   tidyr::pivot_wider(names_from = condition, values_from = proportion) |>
   mutate(change_pct = round((VPA - CTRL) * 100, 1))
 
@@ -955,9 +995,13 @@ DT::datatable(
     mutate(
       CTRL = paste0(round(CTRL * 100, 1), "%"),
       VPA = paste0(round(VPA * 100, 1), "%"),
-      `Change (pp)` = change_pct
+      `
+Change(pp)
+` = change_pct
     ) |>
-    select(cell_type, CTRL, VPA, `Change (pp)`),
+    dplyr::select(cell_type, CTRL, VPA, `
+Change(pp)
+`),
   caption = "Cell type proportion changes (percentage points)",
   options = list(dom = "t"),
   rownames = FALSE
@@ -1031,6 +1075,48 @@ cat(paste(
 ```
 
 
+## References
+
+- Ritchie ME, Phipson B, Wu D, Hu Y, Law CW, Shi W, Smyth GK (2015).
+  "limma powers differential expression analyses for RNA-sequencing and
+  microarray studies." *Nucleic Acids Research* 43(7):e47.
+  <https://doi.org/10.1093/nar/gkv007>
+
+- Law CW, Chen Y, Shi W, Smyth GK (2014). "voom: precision weights
+  unlock linear model analysis tools for RNA-seq read counts." *Genome
+  Biology* 15:R29. <https://doi.org/10.1186/gb-2014-15-2-r29>
+
+- Robinson MD, McCarthy DJ, Smyth GK (2010). "edgeR: a Bioconductor
+  package for differential expression analysis of digital gene expression
+  data." *Bioinformatics* 26(1):139–140.
+  <https://doi.org/10.1093/bioinformatics/btp616>
+
+- Korotkevich G, Sukhov V, Budin N, Shpak B, Artyomov MN, Sergushichev A
+  (2021). "Fast gene set enrichment analysis." *bioRxiv*.
+  <https://doi.org/10.1101/060012>
+
+- Liberzon A, Birger C, Thorvaldsdóttir H, Ghandi M, Mesirov JP, Tamayo P
+  (2015). "The Molecular Signatures Database Hallmark Gene Set Collection."
+  *Cell Systems* 1(6):417–425.
+  <https://doi.org/10.1016/j.cels.2015.12.004>
+
+- Amezquita RA, Lun ATL, Becht E, Carey VJ, Carpp LN, Geistlinger L,
+  Marini F, Rue-Albrecht K, Risso D, Soneson C, Waldron L, Pagès H,
+  Smith ML, Huber W, Morgan M, Gottardo R, Hicks SC (2020).
+  "Orchestrating single-cell analysis with Bioconductor." *Nature Methods*
+  17:137–145. <https://doi.org/10.1038/s41592-019-0654-x>
+
+- McInnes L, Healy J, Melville J (2018). "UMAP: Uniform Manifold
+  Approximation and Projection for Dimension Reduction."
+  *arXiv:1802.03426*. <https://doi.org/10.48550/arXiv.1802.03426>
+
+- Squair JW, Gautier M, Kathe C, Anderson MA, James ND, Hutson TH,
+  Hudelle R, Qaber T, Matson KJE, Baez-Nieto D, Levine AJ, Bhatt DK,
+  Courtine G (2021). "Confronting false discoveries in single-cell
+  differential expression." *Nature Communications* 12:5692.
+  <https://doi.org/10.1038/s41467-021-25960-2>
+
+
 ::: {.callout-note collapse="true"}
 ## Session Info
 
@@ -1039,5 +1125,6 @@ cat(paste(
 #| echo: false
 #| comment: ""
 sessioninfo::session_info(info = "all")
-```
+`
+``
 :::
