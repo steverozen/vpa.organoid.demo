@@ -146,11 +146,15 @@ for VPA effects.
 
 ```{r}
 #| label: design-tables
-cat("Cells per condition × donor:\n")
-table(sce$condition, sce$donor_id)
+knitr::kable(
+  as.data.frame.matrix(table(sce$condition, sce$donor_id)),
+  caption = "Cells per condition × donor"
+)
 
-cat("\nCells per condition × cell type:\n")
-table(sce$condition, sce$cell_type)
+knitr::kable(
+  as.data.frame.matrix(table(sce$condition, sce$cell_type)),
+  caption = "Cells per condition × cell type"
+)
 ```
 
 ```{r}
@@ -453,10 +457,16 @@ pseudobulk_list <- lapply(
 )
 
 # Show sample sizes
-for (ct in names(pseudobulk_list)) {
-  cat("\n", ct, ":\n")
-  print(pseudobulk_list[[ct]]$sample_info[, c("sample", "condition", "n_cells")])
-}
+pb_sample_info <- do.call(rbind, lapply(names(pseudobulk_list), function(ct) {
+  info <- pseudobulk_list[[ct]]$sample_info[, c("sample", "condition", "n_cells")]
+  info$cell_type <- ct
+  info
+}))
+knitr::kable(
+  pb_sample_info[, c("cell_type", "sample", "condition", "n_cells")],
+  caption = "Pseudobulk sample sizes",
+  row.names = FALSE
+)
 ```
 
 ### limma-voom Differential Expression
@@ -583,6 +593,8 @@ wrap_plots(volcano_plots, nrow = 1)
 
 ```{r}
 #| label: de-table
+#| warning: false
+# DT warns about data size due to embedded HTML gene links; harmless
 top_de <- de_all |>
   dplyr::filter(adj.P.Val < 0.10) |>
   arrange(adj.P.Val) |>
@@ -684,11 +696,11 @@ from MSigDB.
 #| label: gsea-gene-sets
 #| message: false
 # Get gene sets
-hallmark_df <- msigdbr(species = "Homo sapiens", category = "H") |>
+hallmark_df <- msigdbr(species = "Homo sapiens", collection = "H") |>
   dplyr::select(gs_name, gene_symbol)
 hallmark <- split(hallmark_df$gene_symbol, hallmark_df$gs_name)
 
-gobp_df <- msigdbr(species = "Homo sapiens", category = "C5", subcategory = "GO:BP") |>
+gobp_df <- msigdbr(species = "Homo sapiens", collection = "C5", subcollection = "GO:BP") |>
   dplyr::select(gs_name, gene_symbol)
 gobp <- split(gobp_df$gene_symbol, gobp_df$gs_name)
 
