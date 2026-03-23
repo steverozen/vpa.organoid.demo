@@ -7,5 +7,26 @@
       "path": "../quarto-bioinfo"
     }
   ],
-  "settings": {}
+  "settings": {
+    "workbench.colorCustomizations": {
+      "activityBar.activeBackground": "#f1d0a0",
+      "activityBar.background": "#f1d0a0",
+      "activityBar.foreground": "#15202b",
+      "activityBar.inactiveForeground": "#15202b99",
+      "activityBarBadge.background": "#19a76d",
+      "activityBarBadge.foreground": "#e7e7e7",
+      "commandCenter.border": "#15202b99",
+      "sash.hoverBorder": "#f1d0a0",
+      "statusBar.background": "#eaba74",
+      "statusBar.foreground": "#15202b",
+      "statusBarItem.hoverBackground": "#e3a448",
+      "statusBarItem.remoteBackground": "#eaba74",
+      "statusBarItem.remoteForeground": "#15202b",
+      "titleBar.activeBackground": "#eaba74",
+      "titleBar.activeForeground": "#15202b",
+      "titleBar.inactiveBackground": "#eaba7499",
+      "titleBar.inactiveForeground": "#15202b99"
+    },
+    "peacock.color": "#eaba74"
+  }
 }
