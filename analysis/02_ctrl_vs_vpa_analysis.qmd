@@ -267,11 +267,12 @@ ggplot(umap_df, aes(UMAP1, UMAP2, color = cell_phase)) +
 
 ### Interactive UMAP (Plotly)
 
-:::{.column-screen}
 ```{r}
 #| label: umap-plotly
 #| fig-width: 10
 #| fig-height: 7
+#| fig-align: center
+#| column: screen
 # Subsample for plotly performance
 set.seed(42)
 idx <- sample(nrow(umap_df), min(10000, nrow(umap_df)))
@@ -305,7 +306,6 @@ p <- plot_ly(
 p
 
 ```
-:::
 
 
 ## Cell Type Composition Analysis
@@ -697,6 +697,8 @@ from MSigDB.
 ```{r}
 #| label: gsea-gene-sets
 #| message: false
+#| column: screen
+#| fig-width: 10
 # Get gene sets
 hallmark_df <- msigdbr(species = "Homo sapiens", collection = "H") |>
   dplyr::select(gs_name, gene_symbol)
@@ -814,6 +816,7 @@ if (nrow(top_pathways) > 0) {
 
 ```{r}
 #| label: gsea-table
+#| 
 gsea_table <- gsea_all |>
   dplyr::filter(pval < 0.05) |>
   arrange(pval) |>
@@ -905,9 +908,9 @@ if (length(known_genes_present) > 0) {
       facet_grid(gene ~ cell_type, scales = "free_y", switch = "y") +
       theme(
         strip.placement = "outside",
-        strip.text.y.left = element_text(angle = 0, size = rel(0.65)),
+        strip.text.y.left = element_text(angle = 0, size = rel(0.7)),
         strip.text.x = element_text(size = rel(0.7)),
-        axis.text.x = element_text(angle = 45, hjust = 1, size = rel(0.6))
+        axis.text.x = element_text(angle = 45, hjust = 1, size = rel(0.7))
       ) +
       labs(
         title = paste0(
