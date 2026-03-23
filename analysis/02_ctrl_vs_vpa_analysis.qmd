@@ -303,6 +303,7 @@ p <- plot_ly(
     yaxis = list(title = "UMAP2")
   )
 p
+
 ```
 :::
 
@@ -613,7 +614,8 @@ DT::datatable(
   top_de,
   caption = "DE genes (FDR < 0.10) across cell types — click gene name for GeneCards",
   escape = FALSE,
-  options = list(pageLength = 25, order = list(list(6, "asc")))
+  rownames = FALSE,
+  options = list(pageLength = 25, order = list(list(5, "asc")))
 )
 ```
 
