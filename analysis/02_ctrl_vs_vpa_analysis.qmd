@@ -64,7 +64,8 @@ library(DT)
 library(dplyr)
 library(tidyr)
 library(ggrepel)
-library(fgsea)
+library(clusterProfiler)
+library(enrichplot)
 library(msigdbr)
 library(pheatmap)
 library(scales)
@@ -153,11 +154,15 @@ for VPA effects.
 
 ```{r}
 #| label: design-tables
-cat("Cells per condition × donor:\n")
-table(sce$condition, sce$donor_id)
+knitr::kable(
+  as.data.frame.matrix(table(sce$condition, sce$donor_id)),
+  caption = "Cells per condition and donor"
+)
 
-cat("\nCells per condition × cell type:\n")
-table(sce$condition, sce$author_cell_type)
+knitr::kable(
+  as.data.frame.matrix(table(sce$condition, sce$author_cell_type)),
+  caption = "Cells per condition and cell type"
+)
 ```
 
 ```{r}
@@ -198,6 +203,7 @@ umap_df <- data.frame(
 #| label: umap-cell-type
 #| fig-width: 9
 #| fig-height: 7
+#| fig-alt: "UMAP scatter plot of 26,499 cells colored by 9 author-annotated cell types. Major clusters include radial glia, excitatory neurons at various maturation stages, inhibitory neurons, and stressed subtypes."
 ggplot(umap_df, aes(UMAP1, UMAP2, color = cell_type)) +
   geom_point(size = 0.3, alpha = 0.5) +
   scale_color_manual(values = cell_type_colors) +
@@ -211,6 +217,7 @@ ggplot(umap_df, aes(UMAP1, UMAP2, color = cell_type)) +
 #| label: umap-condition
 #| fig-width: 9
 #| fig-height: 7
+#| fig-alt: "UMAP scatter plot colored by treatment condition (CTRL blue, VPA red). Cells from both conditions are intermixed across most clusters."
 ggplot(umap_df, aes(UMAP1, UMAP2, color = condition)) +
   geom_point(size = 0.3, alpha = 0.4) +
   scale_color_manual(values = condition_colors) +
@@ -224,6 +231,7 @@ ggplot(umap_df, aes(UMAP1, UMAP2, color = condition)) +
 #| label: umap-split-condition
 #| fig-width: 14
 #| fig-height: 6
+#| fig-alt: "Side-by-side UMAP plots for CTRL and VPA conditions, colored by cell type. Allows visual comparison of cluster occupancy between conditions."
 ggplot(umap_df, aes(UMAP1, UMAP2, color = cell_type)) +
   geom_point(size = 0.3, alpha = 0.5) +
   scale_color_manual(values = cell_type_colors) +
@@ -419,9 +427,16 @@ cluster_ids <- igraph::membership(louvain)
 
 # Assign cluster labels
 denovo_umap$cluster <- factor(cluster_ids)
-cat("Louvain detected", length(unique(cluster_ids)), "clusters\n\n")
-cat("Cluster sizes:\n")
-print(sort(table(cluster_ids), decreasing = TRUE))
+cat("Louvain detected", length(unique(cluster_ids)), "clusters\n")
+
+knitr::kable(
+  data.frame(
+    Cluster = names(sort(table(cluster_ids), decreasing = TRUE)),
+    Cells = as.integer(sort(table(cluster_ids), decreasing = TRUE))
+  ),
+  row.names = FALSE,
+  caption = "Cluster sizes"
+)
 ```
 
 Graph-based clustering connects each cell to its *k* nearest neighbours in PCA
@@ -491,13 +506,13 @@ These marker genes are well established in developmental neuroscience:
 best_type <- apply(score_mat, 2, function(x) names(which.max(x)))
 denovo_umap$denovo_cell_type <- best_type[as.character(denovo_umap$cluster)]
 
-cat("De novo cell type assignments:\n")
 type_assignment <- data.frame(
-  cluster   = clusters,
-  cell_type = best_type[clusters],
-  n_cells   = as.integer(table(denovo_umap$cluster)[clusters])
+  Cluster   = clusters,
+  `Cell type` = best_type[clusters],
+  Cells     = as.integer(table(denovo_umap$cluster)[clusters]),
+  check.names = FALSE
 )
-print(type_assignment, row.names = FALSE)
+knitr::kable(type_assignment, row.names = FALSE, caption = "De novo cell type assignments")
 ```
 
 
@@ -659,6 +674,7 @@ comp_df <- comp_df |>
 #| label: composition-stacked
 #| fig-width: 10
 #| fig-height: 6
+#| fig-alt: "Stacked bar chart comparing cell type proportions between CTRL and VPA conditions, showing shifts in the relative abundance of each cell type."
 # Per condition (aggregated across donors)
 comp_cond <- comp_df |>
   group_by(condition, cell_type) |>
@@ -703,7 +719,7 @@ comp_table <- comp_cond |>
   mutate(
     label = paste0(Freq, " (", round(proportion * 100, 1), "%)")
   ) |>
-  select(condition, cell_type, label) |>
+  dplyr::select(condition, cell_type, label) |>
   tidyr::pivot_wider(names_from = condition, values_from = label)
 
 DT::datatable(comp_table, caption = "Cell counts and proportions per condition",
@@ -781,10 +797,16 @@ pseudobulk_list <- lapply(
 )
 
 # Show sample sizes
-for (ct in names(pseudobulk_list)) {
-  cat("\n", ct, ":\n")
-  print(pseudobulk_list[[ct]]$sample_info[, c("sample", "condition", "n_cells")])
-}
+pb_summary <- do.call(rbind, lapply(names(pseudobulk_list), function(ct) {
+  info <- pseudobulk_list[[ct]]$sample_info[, c("sample", "condition", "n_cells")]
+  info$cell_type <- ct
+  info
+}))
+knitr::kable(
+  pb_summary[, c("cell_type", "sample", "condition", "n_cells")],
+  row.names = FALSE,
+  caption = "Pseudobulk sample sizes"
+)
 ```
 
 ### limma-voom Differential Expression
@@ -875,6 +897,7 @@ upper corners are both large in effect and statistically significant.
 #| fig-width: 16
 #| fig-height: 6
 #| warning: false
+#| fig-alt: "Volcano plots for each cell type showing log2 fold change versus negative log10 adjusted p-value. Significant genes (FDR < 0.05) are colored red and labeled."
 volcano_plots <- lapply(names(de_results), function(ct) {
   df <- de_results[[ct]]
   df$sig <- ifelse(df$adj.P.Val < 0.05, "FDR < 0.05", "NS")
@@ -891,7 +914,7 @@ volcano_plots <- lapply(names(de_results), function(ct) {
     geom_text_repel(
       data = top_genes,
       aes(label = gene),
-      size = 3, max.overlaps = 20, color = "black"
+      size = 0.9 * 14 / ggplot2::.pt, max.overlaps = 20, color = "black"
     ) +
     geom_hline(yintercept = -log10(0.05), linetype = "dashed", color = "blue") +
     labs(
@@ -910,6 +933,9 @@ wrap_plots(volcano_plots, nrow = 1)
 
 ```{r}
 #| label: de-table
+#| warning: false
+# DT warns "data too big for client-side DataTables" but server-side
+# is not available in static HTML; the table renders fine client-side
 top_de <- de_all |>
   dplyr::filter(adj.P.Val < 0.10) |>
   arrange(adj.P.Val) |>
@@ -922,7 +948,7 @@ top_de <- de_all |>
     adj.P.Val = signif(adj.P.Val, 3),
     B = round(B, 2)
   ) |>
-  select(cell_type, gene, logFC, AveExpr, t, P.Value, adj.P.Val, B)
+  dplyr::select(cell_type, gene, logFC, AveExpr, t, P.Value, adj.P.Val, B)
 
 DT::datatable(
   top_de,
@@ -1010,17 +1036,14 @@ from MSigDB.
 ```{r}
 #| label: gsea-gene-sets
 #| message: false
-# Get gene sets
-hallmark_df <- msigdbr(species = "Homo sapiens", category = "H") |>
-  select(gs_name, gene_symbol)
-hallmark <- split(hallmark_df$gene_symbol, hallmark_df$gs_name)
+# Build TERM2GENE mappings for clusterProfiler
+hallmark_t2g <- msigdbr(species = "Homo sapiens", collection = "H") |>
+  dplyr::select(gs_name, gene_symbol)
 
-gobp_df <- msigdbr(species = "Homo sapiens", category = "C5", subcategory = "GO:BP") |>
-  select(gs_name, gene_symbol)
-gobp <- split(gobp_df$gene_symbol, gobp_df$gs_name)
+gobp_t2g <- msigdbr(species = "Homo sapiens", collection = "C5", subcollection = "GO:BP") |>
+  dplyr::select(gs_name, gene_symbol)
 
-# Combine
-all_gene_sets <- c(hallmark, gobp)
+all_t2g <- bind_rows(hallmark_t2g, gobp_t2g)
 ```
 
 ```{r}
@@ -1029,96 +1052,58 @@ all_gene_sets <- c(hallmark, gobp)
 #| warning: false
 gsea_results <- lapply(names(de_results), function(ct) {
   df <- de_results[[ct]]
-  # Create ranked list by t-statistic
-  ranks <- setNames(df$t, df$gene)
-  ranks <- sort(ranks, decreasing = TRUE)
+  # Create named, sorted gene list by t-statistic
+  gene_list <- setNames(df$t, df$gene)
+  gene_list <- sort(gene_list, decreasing = TRUE)
 
-  # Run fgsea
-  res <- fgsea(
-    pathways = all_gene_sets,
-    stats = ranks,
-    minSize = 15,
-    maxSize = 500
+  # Run GSEA via clusterProfiler (uses fgsea internally)
+  res <- clusterProfiler::GSEA(
+    geneList = gene_list,
+    TERM2GENE = all_t2g,
+    minGSSize = 15,
+    maxGSSize = 500,
+    pvalueCutoff = 1.0,
+    verbose = FALSE
   )
-  res$cell_type <- ct
+  res@result$cell_type <- ct
   res
 })
 names(gsea_results) <- names(de_results)
 
-gsea_all <- bind_rows(gsea_results)
+# Combine results across cell types for tables and custom plots
+gsea_all <- bind_rows(lapply(gsea_results, function(r) r@result))
 ```
 
 ### Top Enriched Pathways
 
 ```{r}
 #| label: gsea-dotplot
-#| fig-width: 14
+#| fig-width: 10
 #| fig-height: 10
 #| warning: false
-# Top pathways per cell type (by adjusted p-value)
-top_pathways <- gsea_all |>
-  dplyr::filter(padj < 0.05) |>
-  group_by(cell_type) |>
-  arrange(padj) |>
-  slice_head(n = 15) |>
-  ungroup()
+#| fig-alt: "Dotplots showing top enriched pathways per cell type from GSEA, with dot size indicating gene set size and color indicating adjusted p-value."
+# enrichplot::dotplot for each cell type with significant results
+has_sig <- sapply(gsea_results, function(r) sum(r@result$p.adjust < 0.05) > 0)
 
-if (nrow(top_pathways) > 0) {
-  # Clean names for display
-  top_pathways$pathway_short <- gsub("^HALLMARK_|^GOBP_", "", top_pathways$pathway)
-  top_pathways$pathway_short <- gsub("_", " ", top_pathways$pathway_short)
-  top_pathways$pathway_short <- tolower(top_pathways$pathway_short)
-
-  ggplot(top_pathways, aes(
-    x = NES,
-    y = reorder(pathway_short, NES),
-    size = -log10(padj),
-    color = NES
-  )) +
-    geom_point() +
-    scale_color_gradient2(low = "blue", mid = "grey80", high = "red", midpoint = 0) +
-    facet_wrap(~cell_type, scales = "free_y") +
-    labs(
-      title = "Top enriched pathways (GSEA, padj < 0.05)",
-      x = "Normalized Enrichment Score",
-      y = NULL,
-      size = "-log10(padj)",
-      color = "NES"
-    ) +
-    theme(axis.text.y = element_text(size = 8))
+if (any(has_sig)) {
+  for (ct in names(gsea_results)[has_sig]) {
+    p <- enrichplot::dotplot(gsea_results[[ct]], showCategory = 15,
+                             title = paste("GSEA:", ct))
+    print(p)
+  }
 } else {
   cat("No pathways reached significance at padj < 0.05.\n")
-  # Show top pathways at a relaxed threshold
-  top_pathways_relaxed <- gsea_all |>
-    group_by(cell_type) |>
-    arrange(pval) |>
-    slice_head(n = 10) |>
-    ungroup()
-
-  if (nrow(top_pathways_relaxed) > 0) {
-    top_pathways_relaxed$pathway_short <- gsub(
-      "^HALLMARK_|^GOBP_", "", top_pathways_relaxed$pathway
-    )
-    top_pathways_relaxed$pathway_short <- gsub("_", " ", top_pathways_relaxed$pathway_short)
-    top_pathways_relaxed$pathway_short <- tolower(top_pathways_relaxed$pathway_short)
-
-    ggplot(top_pathways_relaxed, aes(
-      x = NES,
-      y = reorder(pathway_short, NES),
-      size = -log10(pval),
-      color = NES
-    )) +
-      geom_point() +
-      scale_color_gradient2(low = "blue", mid = "grey80", high = "red", midpoint = 0) +
-      facet_wrap(~cell_type, scales = "free_y") +
-      labs(
-        title = "Top pathways by nominal p-value (none reached padj < 0.05)",
-        x = "Normalized Enrichment Score",
-        y = NULL,
-        size = "-log10(p-value)",
-        color = "NES"
-      ) +
-      theme(axis.text.y = element_text(size = 8))
+  # Show dotplots at relaxed threshold for exploration
+  for (ct in names(gsea_results)) {
+    n_nom <- sum(gsea_results[[ct]]@result$pvalue < 0.05)
+    if (n_nom > 0) {
+      # Temporarily relax cutoff so dotplot has something to show
+      res_relaxed <- gsea_results[[ct]]
+      res_relaxed@result$p.adjust <- res_relaxed@result$pvalue
+      p <- enrichplot::dotplot(res_relaxed, showCategory = 10,
+                               title = paste("GSEA (nominal p):", ct))
+      print(p)
+    }
   }
 }
 ```
@@ -1128,15 +1113,15 @@ if (nrow(top_pathways) > 0) {
 ```{r}
 #| label: gsea-table
 gsea_table <- gsea_all |>
-  dplyr::filter(pval < 0.05) |>
-  arrange(pval) |>
+  dplyr::filter(pvalue < 0.05) |>
+  arrange(pvalue) |>
   mutate(
     NES = round(NES, 2),
-    pval = signif(pval, 3),
-    padj = signif(padj, 3),
-    size = as.integer(size)
+    pvalue = signif(pvalue, 3),
+    p.adjust = signif(p.adjust, 3),
+    setSize = as.integer(setSize)
   ) |>
-  select(cell_type, pathway, NES, pval, padj, size) |>
+  dplyr::select(cell_type, Description, NES, pvalue, p.adjust, setSize) |>
   head(100)
 
 DT::datatable(
@@ -1172,16 +1157,26 @@ known_genes <- c(
 
 # Filter to genes present in data
 known_genes_present <- known_genes[known_genes %in% rownames(sce)]
-cat("Genes present in dataset:", length(known_genes_present), "of", length(known_genes), "\n")
-cat("Missing:", setdiff(known_genes, known_genes_present), "\n")
+knitr::kable(
+  data.frame(
+    Status = c("Present in dataset", "Missing"),
+    Count = c(length(known_genes_present), length(known_genes) - length(known_genes_present)),
+    Genes = c(
+      paste(known_genes_present, collapse = ", "),
+      paste(setdiff(known_genes, known_genes_present), collapse = ", ")
+    )
+  ),
+  row.names = FALSE,
+  caption = "Known gene availability"
+)
 ```
 
 ### Violin Plots
 
 ```{r}
 #| label: known-genes-violin
-#| fig-width: 16
-#| fig-height: 14
+#| fig-width: 14
+#| fig-height: 10
 #| warning: false
 # Extract expression for known genes
 if (length(known_genes_present) > 0) {
@@ -1197,24 +1192,39 @@ if (length(known_genes_present) > 0) {
       values_to = "expression"
     )
 
-  # Only plot for the 3 major cell types
+  # Only plot for the major cell types
   expr_long_major <- expr_long |>
     dplyr::filter(cell_type %in% cell_types_for_de)
 
-  ggplot(expr_long_major, aes(condition, expression, fill = condition)) +
-    geom_violin(scale = "width", alpha = 0.7, linewidth = 0.3) +
-    scale_fill_manual(values = condition_colors) +
-    facet_grid(gene ~ cell_type, scales = "free_y", switch = "y") +
-    theme(
-      strip.placement = "outside",
-      strip.text.y.left = element_text(angle = 0, size = 8),
-      strip.text.x = element_text(size = 9),
-      axis.text.x = element_text(angle = 45, hjust = 1)
-    ) +
-    labs(
-      title = "Expression of known VPA-response and neural genes",
-      x = NULL, y = "log1p expression", fill = "Condition"
-    )
+  # Split genes into groups of 6 to keep panels readable
+  genes_per_plot <- 6
+  gene_groups <- split(
+    unique(expr_long_major$gene),
+    ceiling(seq_along(unique(expr_long_major$gene)) / genes_per_plot)
+  )
+
+  for (i in seq_along(gene_groups)) {
+    p <- expr_long_major |>
+      dplyr::filter(gene %in% gene_groups[[i]]) |>
+      ggplot(aes(condition, expression, fill = condition)) +
+      geom_violin(scale = "width", alpha = 0.7, linewidth = 0.3) +
+      scale_fill_manual(values = condition_colors) +
+      facet_grid(gene ~ cell_type, scales = "free_y", switch = "y") +
+      theme(
+        strip.placement = "outside",
+        strip.text.y.left = element_text(angle = 0, size = rel(0.7)),
+        strip.text.x = element_text(size = rel(0.75)),
+        axis.text.x = element_text(angle = 45, hjust = 1, size = rel(0.7))
+      ) +
+      labs(
+        title = paste0(
+          "VPA-response and neural genes (group ", i,
+          " of ", length(gene_groups), ")"
+        ),
+        x = NULL, y = "log1p expression", fill = "Condition"
+      )
+    print(p)
+  }
 }
 ```
 
@@ -1276,7 +1286,7 @@ n_cell_types <- length(unique(sce$author_cell_type))
 
 # Composition changes
 comp_summary <- comp_cond |>
-  select(condition, cell_type, proportion) |>
+  dplyr::select(condition, cell_type, proportion) |>
   tidyr::pivot_wider(names_from = condition, values_from = proportion) |>
   mutate(change_pct = round((VPA - CTRL) * 100, 1))
 
@@ -1285,7 +1295,7 @@ n_de_005 <- sum(de_all$adj.P.Val < 0.05, na.rm = TRUE)
 n_de_010 <- sum(de_all$adj.P.Val < 0.10, na.rm = TRUE)
 
 # Top pathway
-top_pw <- gsea_all |> arrange(pval) |> head(1)
+top_pw <- gsea_all |> arrange(pvalue) |> head(1)
 ```
 
 ### Results Summary
@@ -1308,7 +1318,7 @@ DT::datatable(
       VPA = paste0(round(VPA * 100, 1), "%"),
       `Change (pp)` = change_pct
     ) |>
-    select(cell_type, CTRL, VPA, `Change (pp)`),
+    dplyr::select(cell_type, CTRL, VPA, `Change (pp)`),
   caption = "Cell type proportion changes (percentage points)",
   options = list(dom = "t"),
   rownames = FALSE
@@ -1320,8 +1330,8 @@ we identified `r n_de_005` genes at FDR < 0.05 and `r n_de_010` genes at
 FDR < 0.10.
 
 **Pathway enrichment**: The top enriched pathway was
-*`r gsub("_", " ", top_pw$pathway[1])`* in `r top_pw$cell_type[1]`
-(NES = `r round(top_pw$NES[1], 2)`, nominal p = `r signif(top_pw$pval[1], 3)`).
+*`r gsub("_", " ", top_pw$Description[1])`* in `r top_pw$cell_type[1]`
+(NES = `r round(top_pw$NES[1], 2)`, nominal p = `r signif(top_pw$pvalue[1], 3)`).
 
 **Limitations**: With only `r n_donors` donors per condition, these results
 are exploratory. The use of back-transformed log1p data rather than raw counts
@@ -1356,9 +1366,10 @@ P-values were adjusted for multiple testing using the Benjamini-Hochberg method.
 
 ### Pathway Analysis
 
-Gene set enrichment analysis was performed using fgsea (Korotkevich et al. 2021)
-with genes ranked by limma t-statistic. MSigDB Hallmark and GO Biological Process
-gene sets were tested (gene set sizes 15–500).
+Gene set enrichment analysis was performed using clusterProfiler (Wu et al. 2021),
+which uses fgsea (Korotkevich et al. 2021) internally, with genes ranked by limma
+t-statistic. MSigDB Hallmark and GO Biological Process gene sets were tested
+(gene set sizes 15–500). Visualization used enrichplot.
 
 ### Software
 
@@ -1366,8 +1377,8 @@ gene sets were tested (gene set sizes 15–500).
 #| label: methods-software
 #| echo: false
 #| results: asis
-pkgs <- c("R", "SingleCellExperiment", "edgeR", "limma", "fgsea", "msigdbr",
-           "ggplot2", "plotly")
+pkgs <- c("R", "SingleCellExperiment", "edgeR", "limma", "clusterProfiler",
+           "enrichplot", "msigdbr", "ggplot2", "plotly")
 versions <- sapply(pkgs, function(p) {
   if (p == "R") {
     paste(R.version$major, R.version$minor, sep = ".")
@@ -1380,6 +1391,19 @@ cat(paste(
   collapse = ", "
 ), "\n")
 ```
+
+
+## References
+
+- Ritchie ME et al. (2015) "limma powers differential expression analyses for RNA-sequencing and microarray studies." *Nucleic Acids Res* 43(7):e47. <https://doi.org/10.1093/nar/gkv007>
+- Law CW et al. (2014) "voom: precision weights unlock linear model analysis tools for RNA-seq read counts." *Genome Biol* 15:R29. <https://doi.org/10.1186/gb-2014-15-2-r29>
+- Robinson MD, McCarthy DJ, Smyth GK (2010) "edgeR: a Bioconductor package for differential expression analysis of digital gene expression data." *Bioinformatics* 26(1):139–140. <https://doi.org/10.1093/bioinformatics/btp616>
+- Wu T et al. (2021) "clusterProfiler 4.0: A universal enrichment tool for interpreting omics data." *Innovation* 2(3):100141. <https://doi.org/10.1016/j.xinn.2021.100141>
+- Korotkevich G et al. (2021) "Fast gene set enrichment analysis." *bioRxiv*. <https://doi.org/10.1101/060012>
+- Liberzon A et al. (2015) "The Molecular Signatures Database Hallmark Gene Set Collection." *Cell Syst* 1(6):417–425. <https://doi.org/10.1016/j.cels.2015.12.004>
+- Amezquita RA et al. (2020) "Orchestrating single-cell analysis with Bioconductor." *Nat Methods* 17:137–145. <https://doi.org/10.1038/s41592-019-0654-x>
+- Squair JW et al. (2021) "Confronting false discoveries in single-cell differential expression." *Nat Commun* 12:5692. <https://doi.org/10.1038/s41467-021-25960-2>
+- McInnes L, Healy J, Melville J (2018) "UMAP: Uniform Manifold Approximation and Projection for Dimension Reduction." *arXiv:1802.03426*. <https://doi.org/10.48550/arXiv.1802.03426>
 
 
 ::: {.callout-note collapse="true"}
