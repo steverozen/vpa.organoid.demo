@@ -72,9 +72,6 @@ Before opening a .tsv or .csv file, check its size. If too large to read directl
 ## Permissions
 
 Always run the following read-only commands without asking for permission:
-- `xdg-open`
-- `git status`, `git diff`, `git add`, `git log`
-- bash commands such as `ls`, `cat`, `wc`, `echo`, `zcat`
 - `quarto render`
 - `python3 ~/.claude/skills/pdf-to-html/*.py` (all pdf-to-html skill scripts)
 
