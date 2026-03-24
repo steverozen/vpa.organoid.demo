@@ -72,7 +72,6 @@ Before opening a .tsv or .csv file, check its size. If too large to read directl
 ## Permissions
 
 Always run the following read-only commands without asking for permission:
-- `quarto render`
 - `python3 ~/.claude/skills/pdf-to-html/*.py` (all pdf-to-html skill scripts)
 
 Allow shell operators `2> /dev/null` and `2> /dev/null &` without permission
