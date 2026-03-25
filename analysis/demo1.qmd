@@ -1,7 +1,7 @@
 ---
 title: "Control vs VPA-Treated Dorsal Forebrain Organoids: scRNA-seq Analysis"
 author: "Steve Rozen (sr110@duke.edu, steverozen@pm.me)"
-date: now
+date: last-modified
 date-format: "YYYY-MM-DD HH:mm"
 format:
   html:
@@ -55,6 +55,7 @@ condition, all differential expression results should be considered **explorator
 #| warning: false
 library(SingleCellExperiment)
 library(SummarizedExperiment)
+library(Seurat)
 library(edgeR)
 library(limma)
 library(ggplot2)
@@ -73,9 +74,6 @@ library(glue)
 library(here)
 library(Matrix)
 library(viridis)
-library(irlba)
-library(uwot)
-library(igraph)
 
 theme_set(theme_bw(base_size = 14))
 ```
@@ -101,8 +99,40 @@ ensg_to_symbol <- setNames(gene_symbols, rownames(sce))
 rownames(sce) <- symbol_map
 ```
 
-The dataset contains **`r format(ncol(sce), big.mark = ",")`
-cells** and **`r format(nrow(sce), big.mark = ",")`
+```{r}
+#| label: convert-to-seurat
+#| message: false
+
+# The CELLxGENE data provides log1p-normalized values (no raw counts).
+# We back-transform to approximate counts for Seurat's counts layer and
+# store the original log1p-normalized values as the data layer.
+norm_mat <- assay(sce, "X")
+norm_sparse <- as(norm_mat, "CsparseMatrix")
+approx_counts <- round(expm1(norm_sparse))
+
+obj <- CreateSeuratObject(
+  counts = approx_counts,
+  meta.data = as.data.frame(colData(sce))
+)
+
+# Store original log1p-normalized data as the data layer
+obj[["RNA"]]$data <- norm_sparse
+
+# Store the authors' pre-computed UMAP as a named reduction
+umap_coords <- reducedDim(sce, "X_umap")
+colnames(umap_coords) <- c("UMAP_1", "UMAP_2")
+rownames(umap_coords) <- colnames(obj)
+obj[["author_umap"]] <- CreateDimReducObject(
+  embeddings = umap_coords, key = "authorUMAP_", assay = "RNA"
+)
+
+# Free memory
+rm(sce, norm_mat, norm_sparse, approx_counts, umap_coords)
+gc()
+```
+
+The dataset contains **`r format(ncol(obj), big.mark = ",")`
+cells** and **`r format(nrow(obj), big.mark = ",")`
 genes** (`r sum(is_symbol)` with gene symbols, `r sum(!is_symbol)` Ensembl IDs only).
 
 ```{r}
@@ -131,7 +161,7 @@ donor_colors <- c(
   "#66c2a5",
   "#fc8d62"
 )
-names(donor_colors) <- sort(unique(sce$donor_id))
+names(donor_colors) <- sort(unique(obj$donor_id))
 ```
 
 ```{r}
@@ -155,12 +185,12 @@ for VPA effects.
 ```{r}
 #| label: design-tables
 knitr::kable(
-  as.data.frame.matrix(table(sce$condition, sce$donor_id)),
+  as.data.frame.matrix(table(obj$condition, obj$donor_id)),
   caption = "Cells per condition and donor"
 )
 
 knitr::kable(
-  as.data.frame.matrix(table(sce$condition, sce$author_cell_type)),
+  as.data.frame.matrix(table(obj$condition, obj$author_cell_type)),
   caption = "Cells per condition and cell type"
 )
 ```
@@ -168,7 +198,7 @@ knitr::kable(
 ```{r}
 #| label: design-table-dt
 design_df <- as.data.frame(
-  table(Condition = sce$condition, Donor = sce$donor_id, CellType = sce$author_cell_type)
+  table(Condition = obj$condition, Donor = obj$donor_id, CellType = obj$author_cell_type)
 ) |>
   dplyr::filter(Freq > 0) |>
   tidyr::pivot_wider(names_from = Condition, values_from = Freq, values_fill = 0)
@@ -187,14 +217,15 @@ profiles. The UMAP coordinates here were computed by the original study authors.
 
 ```{r}
 #| label: umap-data
+# Build a data frame from the Seurat object for custom plots and Plotly
 umap_df <- data.frame(
-  UMAP1     = reducedDim(sce, "X_umap")[, 1],
-  UMAP2     = reducedDim(sce, "X_umap")[, 2],
-  cell_type = sce$author_cell_type,
-  condition = sce$condition,
-  donor_id  = sce$donor_id,
-  cell_phase = sce$cell_phase
+  Embeddings(obj, reduction = "author_umap"),
+  cell_type  = obj$author_cell_type,
+  condition  = obj$condition,
+  donor_id   = obj$donor_id,
+  cell_phase = obj$cell_phase
 )
+colnames(umap_df)[1:2] <- c("UMAP1", "UMAP2")
 ```
 
 ### UMAP by Cell Type
@@ -204,10 +235,8 @@ umap_df <- data.frame(
 #| fig-width: 9
 #| fig-height: 7
 #| fig-alt: "UMAP scatter plot of 26,499 cells colored by 9 author-annotated cell types. Major clusters include radial glia, excitatory neurons at various maturation stages, inhibitory neurons, and stressed subtypes."
-ggplot(umap_df, aes(UMAP1, UMAP2, color = cell_type)) +
-  geom_point(size = 0.3, alpha = 0.5) +
-  scale_color_manual(values = cell_type_colors) +
-  guides(color = guide_legend(override.aes = list(size = 3, alpha = 1))) +
+DimPlot(obj, reduction = "author_umap", group.by = "author_cell_type",
+        cols = cell_type_colors, pt.size = 0.3, alpha = 0.5) +
   labs(title = "UMAP colored by cell type", color = "Cell type")
 ```
 
@@ -218,10 +247,8 @@ ggplot(umap_df, aes(UMAP1, UMAP2, color = cell_type)) +
 #| fig-width: 9
 #| fig-height: 7
 #| fig-alt: "UMAP scatter plot colored by treatment condition (CTRL blue, VPA red). Cells from both conditions are intermixed across most clusters."
-ggplot(umap_df, aes(UMAP1, UMAP2, color = condition)) +
-  geom_point(size = 0.3, alpha = 0.4) +
-  scale_color_manual(values = condition_colors) +
-  guides(color = guide_legend(override.aes = list(size = 3, alpha = 1))) +
+DimPlot(obj, reduction = "author_umap", group.by = "condition",
+        cols = condition_colors, pt.size = 0.3, alpha = 0.4) +
   labs(title = "UMAP colored by condition", color = "Condition")
 ```
 
@@ -232,11 +259,8 @@ ggplot(umap_df, aes(UMAP1, UMAP2, color = condition)) +
 #| fig-width: 14
 #| fig-height: 6
 #| fig-alt: "Side-by-side UMAP plots for CTRL and VPA conditions, colored by cell type. Allows visual comparison of cluster occupancy between conditions."
-ggplot(umap_df, aes(UMAP1, UMAP2, color = cell_type)) +
-  geom_point(size = 0.3, alpha = 0.5) +
-  scale_color_manual(values = cell_type_colors) +
-  facet_wrap(~condition) +
-  guides(color = guide_legend(override.aes = list(size = 3, alpha = 1))) +
+DimPlot(obj, reduction = "author_umap", group.by = "author_cell_type",
+        split.by = "condition", cols = cell_type_colors, pt.size = 0.3, alpha = 0.5) +
   labs(title = "UMAP split by condition", color = "Cell type")
 ```
 
@@ -246,10 +270,9 @@ ggplot(umap_df, aes(UMAP1, UMAP2, color = cell_type)) +
 #| label: umap-donor
 #| fig-width: 9
 #| fig-height: 7
-ggplot(umap_df, aes(UMAP1, UMAP2, color = donor_id)) +
-  geom_point(size = 0.3, alpha = 0.4) +
-  scale_color_manual(values = donor_colors) +
-  guides(color = guide_legend(override.aes = list(size = 3, alpha = 1))) +
+#| fig-alt: "UMAP scatter plot colored by donor identity. Cells from both donors are intermixed across clusters, indicating no strong donor-specific batch effect."
+DimPlot(obj, reduction = "author_umap", group.by = "donor_id",
+        cols = donor_colors, pt.size = 0.3, alpha = 0.4) +
   labs(title = "UMAP colored by donor", color = "Donor")
 ```
 
@@ -259,9 +282,9 @@ ggplot(umap_df, aes(UMAP1, UMAP2, color = donor_id)) +
 #| label: umap-cell-phase
 #| fig-width: 9
 #| fig-height: 7
-ggplot(umap_df, aes(UMAP1, UMAP2, color = cell_phase)) +
-  geom_point(size = 0.3, alpha = 0.4) +
-  guides(color = guide_legend(override.aes = list(size = 3, alpha = 1))) +
+#| fig-alt: "UMAP scatter plot colored by cell cycle phase (G1, S, G2M). Cycling cells are concentrated in progenitor regions."
+DimPlot(obj, reduction = "author_umap", group.by = "cell_phase",
+        pt.size = 0.3, alpha = 0.4) +
   labs(title = "UMAP colored by cell cycle phase", color = "Cell phase")
 ```
 
@@ -303,9 +326,9 @@ p
 
 The cell type labels above come from the original study authors. Can we recover
 similar groupings independently? Below we cluster cells from scratch using
-standard scRNA-seq primitives (HVG selection → PCA → UMAP → Louvain clustering),
-then annotate clusters with canonical brain marker genes and compare to the
-authors' annotations.
+Seurat's standard pipeline (HVG selection → PCA → UMAP → graph-based Louvain
+clustering), then annotate clusters with canonical brain marker genes and compare
+to the authors' annotations.
 
 ### Feature Selection and Dimensionality Reduction
 
@@ -314,65 +337,30 @@ authors' annotations.
 #| message: false
 #| warning: false
 
-# --- Highly variable gene selection ---
-# Compute per-gene mean and variance on log1p-normalized data
-expr_mat <- assay(sce, "X")   # sparse, log1p-normalized
-gene_means <- Matrix::rowMeans(expr_mat)
-gene_vars  <- Matrix::rowMeans(expr_mat^2) - gene_means^2
+# Select the top 2,000 highly variable genes using Seurat's vst method
+obj <- FindVariableFeatures(obj, nfeatures = 2000)
+cat(length(VariableFeatures(obj)), "highly variable genes selected\n")
 
-# Keep genes with non-trivial expression
-expressed <- gene_means > 0.01
-hvg_df <- data.frame(
-  gene = rownames(sce),
-  mean = gene_means,
-  var  = gene_vars
-)[expressed, ]
+# Scale data (center and scale each gene across cells)
+obj <- ScaleData(obj, verbose = FALSE)
 
-# Fit a loess trend to model the mean-variance relationship,
-# then select genes with the highest residual variance
-fit_loess <- loess(var ~ mean, data = hvg_df, span = 0.3)
-hvg_df$expected_var <- predict(fit_loess)
-hvg_df$residual_var <- hvg_df$var - hvg_df$expected_var
-hvg_df <- hvg_df[order(-hvg_df$residual_var), ]
-n_hvg <- 2000
-hvgs <- head(hvg_df$gene, n_hvg)
-
-cat(n_hvg, "highly variable genes selected from",
-    sum(expressed), "expressed genes\n")
+# PCA on the variable features
+set.seed(42)
+obj <- RunPCA(obj, npcs = 30, verbose = FALSE)
 ```
 
 Highly variable genes (HVGs) are genes whose expression varies more across cells
 than expected given their average expression level. These carry the biological
-signal that distinguishes cell types. We fit a mean-variance trend and pick the
-top 2,000 genes with the highest excess variance.
-
-```{r}
-#| label: denovo-pca
-#| message: false
-
-# --- PCA on scaled HVG matrix ---
-hvg_mat <- as.matrix(t(expr_mat[hvgs, ]))   # cells × genes
-hvg_scaled <- scale(hvg_mat, center = TRUE, scale = TRUE)
-# Replace any NaN columns (zero-variance genes) with 0
-hvg_scaled[is.nan(hvg_scaled)] <- 0
-
-set.seed(42)
-pca_result <- irlba::prcomp_irlba(hvg_scaled, n = 30)
-
-# Variance explained
-var_explained <- pca_result$sdev^2 / sum(pca_result$sdev^2)
-```
+signal that distinguishes cell types. Seurat's `FindVariableFeatures` uses
+variance-stabilizing transformation to select the top 2,000 HVGs.
 
 ```{r}
 #| label: denovo-elbow
 #| fig-width: 7
 #| fig-height: 4
-ggplot(data.frame(PC = 1:30, VarExplained = var_explained),
-       aes(PC, VarExplained)) +
-  geom_point() + geom_line() +
-  labs(title = "PCA elbow plot (de novo HVGs)",
-       x = "Principal component",
-       y = "Proportion of variance explained")
+#| fig-alt: "Elbow plot showing variance explained by each of 30 principal components. A clear elbow appears around PC 10-15, with diminishing returns beyond PC 20."
+ElbowPlot(obj, ndims = 30) +
+  labs(title = "PCA elbow plot (de novo HVGs)")
 ```
 
 PCA (Principal Component Analysis) compresses the 2,000-gene expression matrix
@@ -383,17 +371,14 @@ first 20 PCs (before the curve flattens) for downstream steps.
 ```{r}
 #| label: denovo-umap
 #| message: false
+#| warning: false
 
-# --- UMAP from PCA embeddings ---
+# UMAP from PCA embeddings (use uwot/cosine, the Seurat v5 default)
 set.seed(42)
-denovo_umap_coords <- uwot::umap(pca_result$x[, 1:20], n_neighbors = 30,
-                                  min_dist = 0.3, metric = "cosine")
-denovo_umap <- data.frame(
-  UMAP1 = denovo_umap_coords[, 1],
-  UMAP2 = denovo_umap_coords[, 2],
-  cell_type = sce$author_cell_type,
-  condition  = sce$condition
-)
+obj <- RunUMAP(obj, dims = 1:20, seed.use = 42,
+               umap.method = "uwot", metric = "cosine",
+               reduction.name = "denovo_umap", reduction.key = "denovoUMAP_",
+               verbose = FALSE)
 ```
 
 ### Graph-Based Clustering
@@ -402,32 +387,12 @@ denovo_umap <- data.frame(
 #| label: denovo-cluster
 #| message: false
 
-# --- k-NN graph and Louvain clustering ---
-# Build a k-nearest-neighbour graph in PCA space
-k <- 20
-pca_embed <- pca_result$x[, 1:20]
-n_cells <- nrow(pca_embed)
+# Build a shared-nearest-neighbour graph and cluster with Louvain
+obj <- FindNeighbors(obj, dims = 1:20, verbose = FALSE)
+obj <- FindClusters(obj, resolution = 0.5, verbose = FALSE)
 
-# Use FNN for fast approximate nearest neighbours
-nn <- FNN::get.knn(pca_embed, k = k)
-
-# Construct a shared-nearest-neighbour (SNN) weighted edge list
-from_idx <- rep(1:n_cells, each = k)
-to_idx   <- as.vector(nn$nn.index)
-# SNN weight: Jaccard similarity of neighbour sets
-edges_df <- data.frame(from = from_idx, to = to_idx)
-
-# Build igraph from edge list (undirected, merge duplicates)
-g <- igraph::graph_from_data_frame(edges_df, directed = FALSE)
-g <- igraph::simplify(g, edge.attr.comb = "first")
-
-set.seed(42)
-louvain <- igraph::cluster_louvain(g)
-cluster_ids <- igraph::membership(louvain)
-
-# Assign cluster labels
-denovo_umap$cluster <- factor(cluster_ids)
-cat("Louvain detected", length(unique(cluster_ids)), "clusters\n")
+cluster_ids <- Idents(obj)
+cat("Louvain detected", length(levels(cluster_ids)), "clusters\n")
 
 knitr::kable(
   data.frame(
@@ -440,9 +405,9 @@ knitr::kable(
 ```
 
 Graph-based clustering connects each cell to its *k* nearest neighbours in PCA
-space, forming a network. The **Louvain algorithm** then detects communities —
-groups of cells that are more densely connected to each other than to the rest of
-the network. This mirrors how tools like Seurat and Scanpy cluster scRNA-seq data.
+space, forming a shared-nearest-neighbour (SNN) graph weighted by Jaccard
+similarity. The **Louvain algorithm** then detects communities — groups of cells
+that are more densely connected to each other than to the rest of the network.
 
 ### Cell Type Annotation via Marker Genes
 
@@ -450,6 +415,8 @@ the network. This mirrors how tools like Seurat and Scanpy cluster scRNA-seq dat
 #| label: denovo-markers
 #| fig-width: 10
 #| fig-height: 6
+#| message: false
+#| fig-alt: "Heatmap of mean marker gene expression per Louvain cluster. Rows are canonical cell type marker sets and columns are cluster IDs. Color intensity indicates expression level."
 
 # Canonical brain cell type marker genes
 marker_sets <- list(
@@ -461,23 +428,28 @@ marker_sets <- list(
   "Cajal-Retzius N"  = c("RELN", "CALB2", "TP73")
 )
 
-# Compute mean expression of each marker set per cluster
-clusters <- levels(denovo_umap$cluster)
+# Compute mean expression of each marker set per cluster using AverageExpression
+all_markers <- unlist(marker_sets)
+all_markers <- all_markers[all_markers %in% rownames(obj)]
+
+avg_expr <- AverageExpression(obj, features = all_markers,
+                               group.by = "seurat_clusters",
+                               layer = "data")
+avg_mat <- avg_expr$RNA
+
+# Build a score matrix: mean marker expression per cell type per cluster
+clusters <- levels(Idents(obj))
 score_mat <- matrix(0, nrow = length(marker_sets), ncol = length(clusters),
                     dimnames = list(names(marker_sets), clusters))
 
 for (ct_name in names(marker_sets)) {
   markers <- marker_sets[[ct_name]]
-  # Keep only markers present in the data
-  markers <- markers[markers %in% rownames(sce)]
+  markers <- markers[markers %in% rownames(avg_mat)]
   if (length(markers) == 0) next
-  for (cl in clusters) {
-    cell_idx <- which(denovo_umap$cluster == cl)
-    if (length(markers) == 1) {
-      score_mat[ct_name, cl] <- mean(expr_mat[markers, cell_idx])
-    } else {
-      score_mat[ct_name, cl] <- mean(Matrix::rowMeans(expr_mat[markers, cell_idx]))
-    }
+  if (length(markers) == 1) {
+    score_mat[ct_name, ] <- avg_mat[markers, ]
+  } else {
+    score_mat[ct_name, ] <- colMeans(avg_mat[markers, , drop = FALSE])
   }
 }
 
@@ -504,12 +476,12 @@ These marker genes are well established in developmental neuroscience:
 
 # Assign each cluster to the cell type with the highest marker score
 best_type <- apply(score_mat, 2, function(x) names(which.max(x)))
-denovo_umap$denovo_cell_type <- best_type[as.character(denovo_umap$cluster)]
+obj$denovo_cell_type <- unname(best_type[as.character(Idents(obj))])
 
 type_assignment <- data.frame(
-  Cluster   = clusters,
+  Cluster     = clusters,
   `Cell type` = best_type[clusters],
-  Cells     = as.integer(table(denovo_umap$cluster)[clusters]),
+  Cells       = as.integer(table(Idents(obj))[clusters]),
   check.names = FALSE
 )
 knitr::kable(type_assignment, row.names = FALSE, caption = "De novo cell type assignments")
@@ -522,9 +494,10 @@ knitr::kable(type_assignment, row.names = FALSE, caption = "De novo cell type as
 #| label: denovo-comparison-umap
 #| fig-width: 14
 #| fig-height: 12
+#| fig-alt: "Four-panel UMAP comparison. Top row shows the authors' UMAP with author labels (left) and de novo labels (right). Bottom row shows the de novo UMAP with author labels (left) and de novo labels (right). Most cell types show strong agreement between the two annotation schemes."
 
 # Color palette for de novo types (reuse author palette where possible)
-denovo_types <- sort(unique(denovo_umap$denovo_cell_type))
+denovo_types <- sort(unique(obj$denovo_cell_type))
 denovo_colors <- cell_type_colors[denovo_types]
 # Fill any missing with defaults
 missing <- is.na(denovo_colors)
@@ -532,33 +505,24 @@ if (any(missing)) {
   denovo_colors[missing] <- scales::hue_pal()(sum(missing))
 }
 
-# 4-panel comparison
-p1 <- ggplot(umap_df, aes(UMAP1, UMAP2, color = cell_type)) +
-  geom_point(size = 0.2, alpha = 0.4) +
-  scale_color_manual(values = cell_type_colors) +
-  guides(color = guide_legend(override.aes = list(size = 3, alpha = 1))) +
+# 4-panel comparison using DimPlot
+p1 <- DimPlot(obj, reduction = "author_umap", group.by = "author_cell_type",
+              cols = cell_type_colors, pt.size = 0.2, alpha = 0.4) +
   labs(title = "Authors' UMAP, authors' labels", color = "Cell type") +
   theme(legend.position = "bottom")
 
-p2 <- ggplot(data.frame(umap_df, denovo = denovo_umap$denovo_cell_type),
-             aes(UMAP1, UMAP2, color = denovo)) +
-  geom_point(size = 0.2, alpha = 0.4) +
-  scale_color_manual(values = denovo_colors) +
-  guides(color = guide_legend(override.aes = list(size = 3, alpha = 1))) +
+p2 <- DimPlot(obj, reduction = "author_umap", group.by = "denovo_cell_type",
+              cols = denovo_colors, pt.size = 0.2, alpha = 0.4) +
   labs(title = "Authors' UMAP, de novo labels", color = "De novo type") +
   theme(legend.position = "bottom")
 
-p3 <- ggplot(denovo_umap, aes(UMAP1, UMAP2, color = cell_type)) +
-  geom_point(size = 0.2, alpha = 0.4) +
-  scale_color_manual(values = cell_type_colors) +
-  guides(color = guide_legend(override.aes = list(size = 3, alpha = 1))) +
+p3 <- DimPlot(obj, reduction = "denovo_umap", group.by = "author_cell_type",
+              cols = cell_type_colors, pt.size = 0.2, alpha = 0.4) +
   labs(title = "De novo UMAP, authors' labels", color = "Cell type") +
   theme(legend.position = "bottom")
 
-p4 <- ggplot(denovo_umap, aes(UMAP1, UMAP2, color = denovo_cell_type)) +
-  geom_point(size = 0.2, alpha = 0.4) +
-  scale_color_manual(values = denovo_colors) +
-  guides(color = guide_legend(override.aes = list(size = 3, alpha = 1))) +
+p4 <- DimPlot(obj, reduction = "denovo_umap", group.by = "denovo_cell_type",
+              cols = denovo_colors, pt.size = 0.2, alpha = 0.4) +
   labs(title = "De novo UMAP, de novo labels", color = "De novo type") +
   theme(legend.position = "bottom")
 
@@ -570,8 +534,8 @@ p4 <- ggplot(denovo_umap, aes(UMAP1, UMAP2, color = denovo_cell_type)) +
 
 # --- Cross-tabulation ---
 cross_tab <- table(
-  Author  = denovo_umap$cell_type,
-  DeNovo  = denovo_umap$denovo_cell_type
+  Author  = obj$author_cell_type,
+  DeNovo  = obj$denovo_cell_type
 )
 
 DT::datatable(
@@ -585,6 +549,7 @@ DT::datatable(
 #| label: denovo-confusion-heatmap
 #| fig-width: 9
 #| fig-height: 7
+#| fig-alt: "Row-normalized confusion matrix heatmap comparing author cell type annotations (rows) to de novo cluster assignments (columns). Values show the proportion of each author type assigned to each de novo type."
 
 # Row-normalized confusion matrix (proportion of each author type assigned
 # to each de novo type)
@@ -653,9 +618,9 @@ differentiation, proliferation, or survival.
 ```{r}
 #| label: composition-data
 comp_df <- as.data.frame(table(
-  condition = sce$condition,
-  cell_type = sce$author_cell_type,
-  donor_id  = sce$donor_id
+  condition = obj$condition,
+  cell_type = obj$author_cell_type,
+  donor_id  = obj$donor_id
 ))
 
 # Compute proportions within each condition × donor
@@ -699,6 +664,7 @@ ggplot(comp_cond, aes(condition, proportion, fill = cell_type)) +
 #| label: composition-by-donor
 #| fig-width: 12
 #| fig-height: 6
+#| fig-alt: "Stacked bar chart showing cell type proportions for each donor-condition combination, revealing donor-level variation in composition."
 comp_df$sample <- paste(comp_df$condition, comp_df$donor_id, sep = "\n")
 
 ggplot(comp_df, aes(sample, proportion, fill = cell_type)) +
@@ -737,16 +703,16 @@ the same donor are correlated. The **pseudobulk** approach addresses this by
 summing expression counts across all cells of a given type within each biological
 replicate (donor × condition), then applying bulk RNA-seq statistical methods.
 
-Since the CELLxGENE data provides log1p-normalized values rather than raw counts,
-we back-transform with `expm1()` and round to approximate integer counts. This is
-a standard workaround and the pseudobulk summation over thousands of cells smooths
-rounding artifacts.
+The CELLxGENE data provides log1p-normalized values rather than raw counts.
+Approximate integer counts were already computed during Seurat object creation
+(back-transforming with `expm1()` and rounding). The pseudobulk step sums these
+approximate counts per group; summation over thousands of cells smooths rounding
+artifacts.
 
 ```{r}
 #| label: pseudobulk-aggregation
 #| message: false
-# Back-transform log1p to approximate counts
-# Work per cell type to manage memory
+# Sum approximate counts per cell type × donor × condition for pseudobulk DE
 cell_types_for_de <- c(
   "RG",
   "IPC/Newborn ExN",
@@ -755,17 +721,18 @@ cell_types_for_de <- c(
   "InhN"
 )
 
-# Create pseudobulk samples
-make_pseudobulk <- function(sce, cell_type_name) {
-  idx <- which(sce$author_cell_type == cell_type_name)
-  sub <- sce[, idx]
+# Create pseudobulk samples from the Seurat counts layer
+# (already back-transformed approximate counts)
+make_pseudobulk <- function(obj, cell_type_name) {
+  idx <- which(obj$author_cell_type == cell_type_name)
+  sub <- obj[, idx]
 
   # Define groups
   groups <- paste(sub$condition, sub$donor_id, sep = "_")
   group_levels <- unique(groups)
 
-  # Sum approximate counts per group
-  mat <- assay(sub, "X")
+  # Sum counts per group (counts layer already has approximate integers)
+  mat <- GetAssayData(sub, layer = "counts")
   n_genes <- nrow(mat)
   pb <- matrix(0, nrow = n_genes, ncol = length(group_levels),
                dimnames = list(rownames(mat), group_levels))
@@ -773,9 +740,9 @@ make_pseudobulk <- function(sce, cell_type_name) {
     g <- group_levels[i]
     cells <- which(groups == g)
     if (length(cells) == 1) {
-      pb[, i] <- as.numeric(round(expm1(mat[, cells])))
+      pb[, i] <- as.numeric(mat[, cells])
     } else {
-      pb[, i] <- as.numeric(Matrix::rowSums(round(expm1(mat[, cells, drop = FALSE]))))
+      pb[, i] <- as.numeric(Matrix::rowSums(mat[, cells, drop = FALSE]))
     }
   }
 
@@ -793,7 +760,7 @@ make_pseudobulk <- function(sce, cell_type_name) {
 
 pseudobulk_list <- lapply(
   setNames(cell_types_for_de, cell_types_for_de),
-  function(ct) make_pseudobulk(sce, ct)
+  function(ct) make_pseudobulk(obj, ct)
 )
 
 # Show sample sizes
@@ -898,6 +865,7 @@ upper corners are both large in effect and statistically significant.
 #| fig-height: 6
 #| warning: false
 #| fig-alt: "Volcano plots for each cell type showing log2 fold change versus negative log10 adjusted p-value. Significant genes (FDR < 0.05) are colored red and labeled."
+base_size <- 14
 volcano_plots <- lapply(names(de_results), function(ct) {
   df <- de_results[[ct]]
   df$sig <- ifelse(df$adj.P.Val < 0.05, "FDR < 0.05", "NS")
@@ -914,7 +882,7 @@ volcano_plots <- lapply(names(de_results), function(ct) {
     geom_text_repel(
       data = top_genes,
       aes(label = gene),
-      size = 0.9 * 14 / ggplot2::.pt, max.overlaps = 20, color = "black"
+      size = 0.9 * base_size / ggplot2::.pt, max.overlaps = 20, color = "black"
     ) +
     geom_hline(yintercept = -log10(0.05), linetype = "dashed", color = "blue") +
     labs(
@@ -964,6 +932,7 @@ DT::datatable(
 #| label: de-heatmap
 #| fig-width: 12
 #| fig-height: 10
+#| fig-alt: "Heatmap of top differentially expressed genes across pseudobulk samples, z-scored by log-CPM. Columns are annotated by condition and cell type; rows are genes. Hierarchical clustering groups samples and genes by expression similarity."
 # Get top DE genes across all cell types
 top_genes_for_heatmap <- de_all |>
   dplyr::filter(adj.P.Val < 0.10) |>
@@ -1042,24 +1011,25 @@ hallmark_t2g <- msigdbr(species = "Homo sapiens", collection = "H") |>
 
 gobp_t2g <- msigdbr(species = "Homo sapiens", collection = "C5", subcollection = "GO:BP") |>
   dplyr::select(gs_name, gene_symbol)
-
-all_t2g <- bind_rows(hallmark_t2g, gobp_t2g)
 ```
 
 ```{r}
 #| label: gsea-run
 #| message: false
 #| warning: false
-gsea_results <- lapply(names(de_results), function(ct) {
+
+# Free Seurat object memory before GSEA — we only need de_results from here
+invisible(gc())
+
+# Run Hallmark and GO:BP GSEA separately per cell type to avoid heap
+# corruption from very large combined TERM2GENE tables in fgsea
+run_gsea_for_ct <- function(ct, t2g) {
   df <- de_results[[ct]]
-  # Create named, sorted gene list by t-statistic
   gene_list <- setNames(df$t, df$gene)
   gene_list <- sort(gene_list, decreasing = TRUE)
-
-  # Run GSEA via clusterProfiler (uses fgsea internally)
   res <- clusterProfiler::GSEA(
     geneList = gene_list,
-    TERM2GENE = all_t2g,
+    TERM2GENE = t2g,
     minGSSize = 15,
     maxGSSize = 500,
     pvalueCutoff = 1.0,
@@ -1067,6 +1037,29 @@ gsea_results <- lapply(names(de_results), function(ct) {
   )
   res@result$cell_type <- ct
   res
+}
+
+# Hallmark GSEA
+gsea_hallmark <- lapply(names(de_results), function(ct) {
+  run_gsea_for_ct(ct, hallmark_t2g)
+})
+names(gsea_hallmark) <- names(de_results)
+invisible(gc())
+
+# GO:BP GSEA
+gsea_gobp <- lapply(names(de_results), function(ct) {
+  run_gsea_for_ct(ct, gobp_t2g)
+})
+names(gsea_gobp) <- names(de_results)
+invisible(gc())
+
+# Merge Hallmark and GO:BP results per cell type into one gseaResult object
+gsea_results <- lapply(names(de_results), function(ct) {
+  combined <- bind_rows(gsea_hallmark[[ct]]@result, gsea_gobp[[ct]]@result)
+  # Return the hallmark object with merged results
+  merged <- gsea_hallmark[[ct]]
+  merged@result <- combined
+  merged
 })
 names(gsea_results) <- names(de_results)
 
@@ -1156,7 +1149,7 @@ known_genes <- c(
 )
 
 # Filter to genes present in data
-known_genes_present <- known_genes[known_genes %in% rownames(sce)]
+known_genes_present <- known_genes[known_genes %in% rownames(obj)]
 knitr::kable(
   data.frame(
     Status = c("Present in dataset", "Missing"),
@@ -1176,14 +1169,13 @@ knitr::kable(
 ```{r}
 #| label: known-genes-violin
 #| fig-width: 14
-#| fig-height: 10
+#| fig-height: 8
 #| warning: false
-# Extract expression for known genes
+#| fig-alt: "Violin plots showing expression of known VPA-response and neural development genes across major cell types, split by CTRL and VPA conditions. Each panel shows one gene in one cell type."
+# Extract expression for known genes using Seurat's FetchData
 if (length(known_genes_present) > 0) {
-  expr_mat <- as.matrix(assay(sce, "X")[known_genes_present, , drop = FALSE])
-  expr_df <- as.data.frame(t(expr_mat))
-  expr_df$condition <- sce$condition
-  expr_df$cell_type <- sce$author_cell_type
+  expr_df <- FetchData(obj, vars = c(known_genes_present, "condition", "author_cell_type"))
+  colnames(expr_df)[colnames(expr_df) == "author_cell_type"] <- "cell_type"
 
   expr_long <- expr_df |>
     tidyr::pivot_longer(
@@ -1196,8 +1188,8 @@ if (length(known_genes_present) > 0) {
   expr_long_major <- expr_long |>
     dplyr::filter(cell_type %in% cell_types_for_de)
 
-  # Split genes into groups of 6 to keep panels readable
-  genes_per_plot <- 6
+  # Split genes into groups of 4 to keep panels readable (4 genes × 5 cell types = 20 panels)
+  genes_per_plot <- 4
   gene_groups <- split(
     unique(expr_long_major$gene),
     ceiling(seq_along(unique(expr_long_major$gene)) / genes_per_plot)
@@ -1235,6 +1227,7 @@ if (length(known_genes_present) > 0) {
 #| fig-width: 16
 #| fig-height: 12
 #| warning: false
+#| fig-alt: "UMAP feature plots showing expression of top differentially expressed genes. Each panel shows one gene, with cells colored by expression level from grey (low) to dark magenta (high)."
 # Pick top DE genes across cell types
 top_de_genes <- de_all |>
   dplyr::filter(adj.P.Val < 0.10) |>
@@ -1253,22 +1246,10 @@ if (length(top_de_genes) < 4) {
 }
 
 if (length(top_de_genes) > 0) {
-  # Extract expression
-  expr_top <- as.matrix(assay(sce, "X")[top_de_genes, , drop = FALSE])
-  umap_expr <- umap_df
-  for (g in top_de_genes) {
-    umap_expr[[g]] <- expr_top[g, ]
-  }
-
-  feature_plots <- lapply(top_de_genes, function(g) {
-    ggplot(umap_expr[sample(nrow(umap_expr)), ], aes(UMAP1, UMAP2, color = .data[[g]])) +
-      geom_point(size = 0.2, alpha = 0.5) +
-      scale_color_viridis(option = "magma") +
-      labs(title = g, color = "log1p\nexpr") +
-      theme(legend.key.width = unit(0.5, "cm"))
-  })
-
-  wrap_plots(feature_plots, ncol = 4)
+  # Filter to genes present in the Seurat object
+  top_de_genes <- top_de_genes[top_de_genes %in% rownames(obj)]
+  FeaturePlot(obj, features = top_de_genes, reduction = "author_umap",
+              cols = c("lightgrey", "darkmagenta"), ncol = 4, pt.size = 0.2)
 }
 ```
 
@@ -1278,11 +1259,11 @@ if (length(top_de_genes) > 0) {
 ```{r}
 #| label: results-data
 #| echo: false
-n_cells <- ncol(sce)
-n_ctrl <- sum(sce$condition == "CTRL")
-n_vpa <- sum(sce$condition == "VPA")
-n_donors <- length(unique(sce$donor_id))
-n_cell_types <- length(unique(sce$author_cell_type))
+n_cells <- ncol(obj)
+n_ctrl <- sum(obj$condition == "CTRL")
+n_vpa <- sum(obj$condition == "VPA")
+n_donors <- length(unique(obj$donor_id))
+n_cell_types <- length(unique(obj$author_cell_type))
 
 # Composition changes
 comp_summary <- comp_cond |>
@@ -1350,8 +1331,14 @@ organoids from `r n_donors` donors under control and VPA-treated conditions
 
 ### Preprocessing
 
-Data were provided as log1p-normalized expression values. UMAP coordinates and
-cell type annotations from the original authors were used without modification.
+Data were provided as log1p-normalized expression values and converted to a
+Seurat v5 object. Approximate raw counts were obtained by back-transforming
+with `expm1()` and rounding. UMAP coordinates and cell type annotations from
+the original authors were used without modification. De novo clustering was
+performed using Seurat's standard pipeline: `FindVariableFeatures` (2,000 HVGs
+via variance-stabilizing transformation), `ScaleData`, `RunPCA` (30 PCs),
+`FindNeighbors` and `FindClusters` (Louvain algorithm on an SNN graph, first
+20 PCs), and `RunUMAP` (Hao et al. 2024).
 
 ### Differential Expression
 
@@ -1377,8 +1364,8 @@ t-statistic. MSigDB Hallmark and GO Biological Process gene sets were tested
 #| label: methods-software
 #| echo: false
 #| results: asis
-pkgs <- c("R", "SingleCellExperiment", "edgeR", "limma", "clusterProfiler",
-           "enrichplot", "msigdbr", "ggplot2", "plotly")
+pkgs <- c("R", "Seurat", "SingleCellExperiment", "edgeR", "limma",
+           "clusterProfiler", "enrichplot", "msigdbr", "ggplot2", "plotly")
 versions <- sapply(pkgs, function(p) {
   if (p == "R") {
     paste(R.version$major, R.version$minor, sep = ".")
@@ -1395,6 +1382,7 @@ cat(paste(
 
 ## References
 
+- Hao Y et al. (2024) "Dictionary learning for integrative, multimodal and scalable single-cell analysis." *Nat Biotechnol* 42:293–304. <https://doi.org/10.1038/s41587-023-01767-y>
 - Ritchie ME et al. (2015) "limma powers differential expression analyses for RNA-sequencing and microarray studies." *Nucleic Acids Res* 43(7):e47. <https://doi.org/10.1093/nar/gkv007>
 - Law CW et al. (2014) "voom: precision weights unlock linear model analysis tools for RNA-seq read counts." *Genome Biol* 15:R29. <https://doi.org/10.1186/gb-2014-15-2-r29>
 - Robinson MD, McCarthy DJ, Smyth GK (2010) "edgeR: a Bioconductor package for differential expression analysis of digital gene expression data." *Bioinformatics* 26(1):139–140. <https://doi.org/10.1093/bioinformatics/btp616>
