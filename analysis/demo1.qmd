@@ -1,5 +1,6 @@
 ---
 title: "Control vs VPA-Treated Dorsal Forebrain Organoids: scRNA-seq Analysis"
+subtitle: "Source: `analysis/demo1.qmd`"
 author: "Steve Rozen (sr110@duke.edu, steverozen@pm.me)"
 date: last-modified
 date-format: "YYYY-MM-DD HH:mm"
@@ -59,7 +60,6 @@ library(Seurat)
 library(edgeR)
 library(limma)
 library(ggplot2)
-library(plotly)
 library(patchwork)
 library(DT)
 library(dplyr)
@@ -217,7 +217,7 @@ profiles. The UMAP coordinates here were computed by the original study authors.
 
 ```{r}
 #| label: umap-data
-# Build a data frame from the Seurat object for custom plots and Plotly
+# Build a data frame from the Seurat object for custom plots
 umap_df <- data.frame(
   Embeddings(obj, reduction = "author_umap"),
   cell_type  = obj$author_cell_type,
@@ -287,39 +287,6 @@ DimPlot(obj, reduction = "author_umap", group.by = "cell_phase",
         pt.size = 0.3, alpha = 0.4) +
   labs(title = "UMAP colored by cell cycle phase", color = "Cell phase")
 ```
-
-### Interactive UMAP (Plotly)
-
-:::{.column-screen}
-```{r}
-#| label: umap-plotly
-#| fig-width: 10
-#| fig-height: 7
-# Subsample for plotly performance
-set.seed(42)
-idx <- sample(nrow(umap_df), min(10000, nrow(umap_df)))
-umap_sub <- umap_df[idx, ]
-
-p <- plot_ly(
-  umap_sub,
-  x = ~UMAP1, y = ~UMAP2,
-  color = ~cell_type,
-  colors = cell_type_colors,
-  text = ~paste("Cell type:", cell_type,
-                "<br>Condition:", condition,
-                "<br>Donor:", donor_id),
-  type = "scatter", mode = "markers",
-  marker = list(size = 3, opacity = 0.6),
-  width = 900, height = 650
-) |>
-  layout(
-    title = "Interactive UMAP (10,000 cell subsample)",
-    xaxis = list(title = "UMAP1"),
-    yaxis = list(title = "UMAP2")
-  )
-p
-```
-:::
 
 
 ## De Novo Clustering and Cell Type Annotation
@@ -633,32 +600,19 @@ comp_df <- comp_df |>
   ungroup()
 ```
 
-### Stacked Bar Chart
-
 ```{r}
-#| label: composition-stacked
-#| fig-width: 10
-#| fig-height: 6
-#| fig-alt: "Stacked bar chart comparing cell type proportions between CTRL and VPA conditions, showing shifts in the relative abundance of each cell type."
-# Per condition (aggregated across donors)
+#| label: composition-by-condition
+#| echo: false
+# Aggregate proportions per condition (used by composition table and results summary)
 comp_cond <- comp_df |>
   group_by(condition, cell_type) |>
   summarize(Freq = sum(Freq), .groups = "drop") |>
   group_by(condition) |>
   mutate(proportion = Freq / sum(Freq)) |>
   ungroup()
-
-ggplot(comp_cond, aes(condition, proportion, fill = cell_type)) +
-  geom_col(width = 0.6) +
-  scale_fill_manual(values = cell_type_colors) +
-  scale_y_continuous(labels = percent_format()) +
-  labs(
-    title = "Cell type composition by condition",
-    x = "Condition", y = "Proportion", fill = "Cell type"
-  )
 ```
 
-### Composition by Donor
+### Composition by Donor and Treatment
 
 ```{r}
 #| label: composition-by-donor
@@ -1386,7 +1340,7 @@ t-statistic. MSigDB Hallmark and GO Biological Process gene sets were tested
 #| echo: false
 #| results: asis
 pkgs <- c("R", "Seurat", "SingleCellExperiment", "edgeR", "limma",
-           "clusterProfiler", "enrichplot", "msigdbr", "ggplot2", "plotly")
+           "clusterProfiler", "enrichplot", "msigdbr", "ggplot2")
 versions <- sapply(pkgs, function(p) {
   if (p == "R") {
     paste(R.version$major, R.version$minor, sep = ".")
