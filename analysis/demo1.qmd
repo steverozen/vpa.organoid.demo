@@ -128,7 +128,7 @@ obj[["author_umap"]] <- CreateDimReducObject(
 
 # Free memory
 rm(sce, norm_mat, norm_sparse, approx_counts, umap_coords)
-gc()
+invisible(gc())
 ```
 
 The dataset contains **`r format(ncol(obj), big.mark = ",")`
@@ -709,6 +709,27 @@ Approximate integer counts were already computed during Seurat object creation
 approximate counts per group; summation over thousands of cells smooths rounding
 artifacts.
 
+::: {.callout-note collapse="true"}
+## Why manual pseudobulk instead of Seurat's `AggregateExpression()`?
+
+Seurat v5 provides `AggregateExpression()` for pseudobulk aggregation, but we
+use a manual approach here because it gives us:
+
+- **Structured sample metadata** (`condition`, `donor_id`, `n_cells`) ready for
+  the limma-voom design matrix — `AggregateExpression()` returns only a counts
+  matrix with composite column names (e.g. `"CTRL_donor1"`) that must be parsed
+  back apart.
+- **Per-cell-type splitting** built into the function.
+- **Explicit layer control** — it is clear we are summing from the `counts`
+  layer (the back-transformed approximate integers from `expm1()` + rounding).
+
+Switching to `AggregateExpression()` would save ~5 lines of the row-summing
+loop but add ~10 lines of column-name parsing and metadata reconstruction.
+The manual approach is the standard pattern recommended by
+[Squair et al. (2021)](https://doi.org/10.1038/s41467-021-25960-2) and
+*Orchestrating Single-Cell Analysis with Bioconductor*.
+:::
+
 ```{r}
 #| label: pseudobulk-aggregation
 #| message: false
@@ -861,8 +882,8 @@ upper corners are both large in effect and statistically significant.
 
 ```{r}
 #| label: volcano-plots
-#| fig-width: 16
-#| fig-height: 6
+#| fig-width: 10
+#| fig-height: 15
 #| warning: false
 #| fig-alt: "Volcano plots for each cell type showing log2 fold change versus negative log10 adjusted p-value. Significant genes (FDR < 0.05) are colored red and labeled."
 base_size <- 14
@@ -894,7 +915,7 @@ volcano_plots <- lapply(names(de_results), function(ct) {
     theme(legend.position = "bottom")
 })
 
-wrap_plots(volcano_plots, nrow = 1)
+wrap_plots(volcano_plots, ncol = 2)
 ```
 
 ### Top DE Genes Table
